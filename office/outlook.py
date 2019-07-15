@@ -14,6 +14,7 @@ Example:
 import base64
 import datetime 
 import logging
+import pytz
 from win32com.client import Dispatch
 import win32com.client
 
@@ -24,13 +25,15 @@ class Outlook:
         self.ns = self.outlook = self.inbox = None
 
     def _connect(self):
-        self.outlook = Dispatch("Outlook.Application")
-        self.ns = self.outlook.GetNamespace("MAPI")
-        self.inbox = self.ns.GetDefaultFolder("6")
+        # https://docs.microsoft.com/en-us/office/vba/api/outlook.oldefaultfolders
+        if not self.outlook:
+            self.outlook = Dispatch("Outlook.Application")
+            self.ns = self.outlook.GetNamespace("MAPI")
+            self.calendar = self.ns.GetDefaultFolder(9)
+            self.inbox = self.ns.GetDefaultFolder(6)
 
     def create_mail(self, to: str, subject: str, body: str, cc: str='', attachments: list=[], show: bool=False, send: bool=False):
-        if not self.outlook:
-            self._connect()
+        self._connect()
         msg = self.outlook.CreateItem(0x0)
         msg.Subject = subject
         for path in attachments:
@@ -103,10 +106,76 @@ class Outlook:
         foot = '\n</table>'
         return self.tbl_style() + head + rows + foot
 
+    def find_open_slots(self, appts, duration=None):
+        # appts should be list of start/end times
+        start = appts[0][0]
+        end = appts[-1][1]
+        # find open slots between 9am–6pm
+        utc = pytz.UTC
+        hours = (utc.localize(datetime.datetime(start.year, start.month, start.day, 9)),
+                 utc.localize(datetime.datetime(end.year, end.month, end.day, 18)))
+
+        if duration is None:
+            duration = datetime.timedelta(minutes=30)
+
+        slots = sorted([(hours[0], hours[0])] + appts + [(hours[1], hours[1])])
+        open_slots = []
+        for start, end in ((slots[i][1], slots[i+1][0]) for i in range(len(slots)-1)):
+            while start + duration <= end:
+                open_slots.append([start, start + duration])
+                start += duration
+        this = open_slots[0]
+        print(f'\n{this[0]:%Y-%m-%d}')
+        for slot in open_slots[1:]:
+            # only offer up times after default start time
+            if slot[0].hour < hours[0].hour or slot[0].hour > hours[1].hour:
+                continue
+            # or before the default end time
+            if slot[1].hour < hours[0].hour or slot[1].hour > hours[1].hour:
+                continue
+            # otherwise, check if we should combine consecutive time sequences
+            if slot[0] <= this[1]:
+                this[1] = slot[1]
+            # if not, print them out and move on to the next one
+            else:
+                print(f'  {this[0]:%I:%M %p} to {this[1]:%I:%M %p}')
+                if this[0].day != slot[0].day:
+                    print(f'\n{this[0]:%Y-%m-%d}')
+                this = slot
+
+    def show_appts(self, begin=None, end=None):
+        self._connect()
+        if begin is None:
+            begin = datetime.date.today() + datetime.timedelta(days=1) # tomorrow
+        if end is None:
+            end = begin + datetime.timedelta(days=2) # duration of 1 day
+
+        # http://msdn.microsoft.com/en-us/library/office/aa210899(v=office.11).aspx
+        appts = self.calendar.Items 
+
+        appts.IncludeRecurrences = "True"
+        # Need the following call to 'Sort', otherwise will include all
+        # recurrences (whether they are in the list or not!)
+        appts.Sort("[Start]")
+        where = f"[Start] >= '{begin.strftime('%m/%d/%Y')}' AND [End] <= '{end.strftime('%m/%d/%Y')}'"
+
+        msg = "{1:%H:%M}–{2:%H:%M}, {0} (Organizer: {3})"
+        appt_lst = []
+        for item in appts.Restrict(where):
+            print(msg.format(item.Subject, item.Start, item.End, item.Organizer))
+            appt_lst.append((item.Start, item.End,))
+        print("\nOpen Slots:")
+        self.find_open_slots(appt_lst)
+
 
 if __name__ == "__main__":
     outlook = Outlook()
-    tbl = outlook.list_to_tbl([[1, 2, 3], [4, 5, 6]])
-    with open(r'C:\test1.png', 'rb') as io:
-        img = outlook.inline_img(io)
-    outlook.create_mail('test@example.com', 'Hello!', f'Hello!<br><br>{tbl}<br><br>{img}<br><br>Goodbye!', show=True)
+    create_html_sample = 0
+    show_appts = 1
+    if create_html_sample:
+        tbl = outlook.list_to_tbl([[1, 2, 3], [4, 5, 6]])
+        with open(r'C:\test1.png', 'rb') as io:
+            img = outlook.inline_img(io)
+        outlook.create_mail('test@example.com', 'Hello!', f'Hello!<br><br>{tbl}<br><br>{img}<br><br>Goodbye!', show=True)
+    if show_appts:
+        outlook.show_appts()
