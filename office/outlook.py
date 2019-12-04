@@ -168,6 +168,50 @@ class Outlook:
         self.find_open_slots(appt_lst)
 
 
+    def messages(self):
+        """
+        Return all messages from the inbox sorted by ReceivedTime (descending).
+        """
+        self._connect()
+        inbox = self.ns.GetDefaultFolder(6)
+        messages = inbox.Items
+        messages.Sort("ReceivedTime", True)
+        message = messages.GetFirst()
+        while message:
+            yield message
+            message = messages.GetNext()
+
+
+    def filter_messages(self, after=None, before=None, subject=None, done=None):
+        """
+        Return pipeline reports in Outlook sent after `after` and before `before`.
+
+        If `after` is None, return any pipeline report since the last one was
+        downloaded (according to `last_time_downloaded`). If `before` is None (the
+        default), any win report after `after` is extracted.
+
+        subject, if provided, should be a function taking a message subject as
+        its only argument and returning True if you want to keep the message,
+        False otherwise.
+
+        done, if provided, should be a function that takes a message object and
+        returns True if you want to stop iterating over messages or False if
+        you want to keep going. If not provided, this function will go through
+        every message in your inbox.
+        """
+        has_recd_time = lambda msg: hasattr(msg, 'ReceivedTime')
+        always_true = lambda _: True
+        before = before or always_true
+        after = after or always_true
+        subject = subject or always_true
+        done = done or always_true
+        for msg in self.messages():
+            if has_recd_time(msg) and before(msg.ReceivedTime) and after(msg.ReceivedTime) and subject(msg.Subject):
+                yield msg
+            if done(msg):
+                break
+
+
 if __name__ == "__main__":
     outlook = Outlook()
     create_html_sample = 0
