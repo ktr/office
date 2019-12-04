@@ -3,7 +3,7 @@ excel.py - utilities to help with Microsoft Excel (TM)
 """
 
 import logging
-from path import Path
+from pathlib import Path
 import string
 import sys
 from typing import Dict
