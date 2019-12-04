@@ -142,6 +142,24 @@ class Outlook:
                 if this[0].day != slot[0].day:
                     print(f'\n{this[0]:%Y-%m-%d}')
                 this = slot
+        print(f'  {this[0]:%I:%M %p} to {this[1]:%I:%M %p}')
+
+    def appointments(self, begin=None, end=None):
+        self._connect()
+        if begin is None:
+            begin = datetime.date.today() + datetime.timedelta(days=1) # tomorrow
+        if end is None:
+            end = begin + datetime.timedelta(days=2) # duration of 1 day
+
+        # http://msdn.microsoft.com/en-us/library/office/aa210899(v=office.11).aspx
+        appts = self.calendar.Items 
+        appts.IncludeRecurrences = "True"
+        # Need the following call to 'Sort', otherwise will include all
+        # recurrences (whether they are in the list or not!)
+        appts.Sort("[Start]")
+        where = f"[Start] >= '{begin.strftime('%m/%d/%Y')}' AND [End] <= '{end.strftime('%m/%d/%Y')}'"
+
+        return [_ for _ in appts.Restrict(where)]
 
     def show_appts(self, begin=None, end=None):
         self._connect()
